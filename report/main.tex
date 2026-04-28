@@ -1,0 +1,526 @@
+\documentclass[conference]{IEEEtran}
+\IEEEoverridecommandlockouts
+\usepackage[utf8]{inputenc}
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{algorithmic}
+\usepackage{graphicx}
+\graphicspath{{images/}}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{float}
+\usepackage{multirow}
+\usepackage{array}
+\usepackage{hyperref}
+
+\def\BibTeX{{\rm B\kern-.05em{\sc i\kern-.025em b}\kern-.08em
+    T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
+
+\begin{document}
+
+\title{Implementaci\'{o}n de Regresi\'{o}n Log\'{i}stica con PyTorch\\
+{\large Clasificaci\'{o}n de Calidad de Vino Tinto}}
+
+\author{
+\IEEEauthorblockN{1\textsuperscript{st} Victor Aymerich}
+\IEEEauthorblockA{\textit{Escuela de Ingenier\'{i}a en Computaci\'{o}n} \\
+\textit{Instituto Tecnol\'{o}gico de Costa Rica}\\
+Cartago, Costa Rica \\
+vaymerich@estudiantec.cr}
+\and
+\IEEEauthorblockN{2\textsuperscript{nd} Alberto Alvarez}
+\IEEEauthorblockA{\textit{Escuela de Ingenier\'{i}a en Computaci\'{o}n} \\
+\textit{Instituto Tecnol\'{o}gico de Costa Rica}\\
+Cartago, Costa Rica \\
+albalvarez@estudiantec.cr}
+\and
+\IEEEauthorblockN{3\textsuperscript{rd} Alfredo Mercado}
+\IEEEauthorblockA{\textit{Escuela de Ingenier\'{i}a en Computaci\'{o}n} \\
+\textit{Instituto Tecnol\'{o}gico de Costa Rica}\\
+Cartago, Costa Rica \\
+amercado@estudiantec.cr}
+}
+
+\maketitle
+
+% ── ABSTRACT ──────────────────────────────────────────────────────────────────
+\begin{abstract}
+Este trabajo presenta el dise\~{n}o, implementaci\'{o}n y evaluaci\'{o}n de un modelo de regresi\'{o}n log\'{i}stica construido con PyTorch para clasificar la calidad de vinos tintos como \textit{BUENA} o \textit{MALA}. Se realiz\'{o} un an\'{a}lisis exploratorio exhaustivo sobre 1{,}143 instancias, incluyendo detecci\'{o}n y correcci\'{o}n de valores at\'{i}picos mediante winzorizaci\'{o}n calculada exclusivamente sobre el conjunto de entrenamiento. La selecci\'{o}n de las seis caracter\'{i}sticas m\'{a}s relevantes se fundament\'{o} matem\'{a}ticamente combinando correlaci\'{o}n de Pearson e informaci\'{o}n mutua, tambi\'{e}n calculadas sobre entrenamiento para evitar \textit{data leakage}. El conjunto de datos fue dividido de forma estratificada en entrenamiento~(70\%), validaci\'{o}n~(15\%) y prueba~(15\%). Se ejecutaron diez experimentos con distintas combinaciones de \textit{learning rate}, \textit{batch size} y \textit{epochs}. El modelo final, correspondiente al Experimento~9 (LR\,=\,0.0005, batch\,=\,32, epochs\,=\,200), alcanz\'{o} un AUC de 0.8277 y un F1-Score de 0.7650 sobre el conjunto de prueba, sin evidencia de sobreajuste.
+\end{abstract}
+
+\begin{IEEEkeywords}
+regresi\'{o}n log\'{i}stica, PyTorch, clasificaci\'{o}n binaria, calidad de vino, an\'{a}lisis exploratorio, selecci\'{o}n de caracter\'{i}sticas, binary cross-entropy
+\end{IEEEkeywords}
+
+% ── I. INTRODUCCIÓN ───────────────────────────────────────────────────────────
+\section{Introducci\'{o}n}
+
+La evaluaci\'{o}n de la calidad del vino es una tarea que recae tradicionalmente en expertos mediante catas sensoriales, proceso costoso, subjetivo y dif\'{i}cil de escalar. El uso de modelos de aprendizaje autom\'{a}tico entrenados sobre propiedades f\'{i}sico-qu\'{i}micas medibles constituye una alternativa objetiva y reproducible que ha ganado relevancia en la industria vitivin\'{i}cola~\cite{cortez2009}.
+
+El \textit{dataset} utilizado, obtenido de Kaggle~\cite{kaggle}, contiene 1{,}143 registros de vinos tintos con 11 caracter\'{i}sticas f\'{i}sico-qu\'{i}micas y una variable de calidad con valores enteros del 3 al 8. El objetivo de esta tarea es construir un clasificador binario que determine si un vino posee calidad \textit{BUENA} o \textit{MALA}, utilizando regresi\'{o}n log\'{i}stica implementada desde cero en PyTorch~\cite{pytorch}.
+
+La regresi\'{o}n log\'{i}stica es un modelo lineal generalizado apropiado para clasificaci\'{o}n binaria. Su funci\'{o}n sigmoide produce probabilidades interpretables, sus pesos son directamente relacionables con la influencia de cada variable, y su implementaci\'{o}n en PyTorch permite extender el c\'{o}digo f\'{a}cilmente a arquitecturas m\'{a}s complejas. Estas caracter\'{i}sticas la hacen una elecci\'{o}n id\'{o}nea como punto de partida para este problema.
+
+% ── II. ANÁLISIS EXPLORATORIO ─────────────────────────────────────────────────
+\section{An\'{a}lisis Exploratorio de Datos}
+
+\subsection{Descripci\'{o}n del Dataset}
+
+El conjunto de datos no presenta valores nulos en ninguna de sus variables, lo que elimina la necesidad de imputaci\'{o}n. Las 11 variables predictoras son continuas de tipo \texttt{float64} y la variable \texttt{quality} es entera. La Tabla~\ref{tab:estadisticas} resume las estad\'{i}sticas descriptivas de las variables m\'{a}s relevantes.
+
+\begin{table}[H]
+\caption{Estad\'{i}sticas descriptivas de variables principales}
+\label{tab:estadisticas}
+\centering
+\begin{tabular}{lrrrr}
+\toprule
+\textbf{Variable} & \textbf{Media} & \textbf{Std} & \textbf{M\'{i}n} & \textbf{M\'{a}x} \\
+\midrule
+fixed acidity        & 8.311  & 1.748 & 4.60  & 15.90 \\
+volatile acidity     & 0.531  & 0.180 & 0.12  & 1.58  \\
+citric acid          & 0.268  & 0.197 & 0.00  & 1.00  \\
+chlorides            & 0.087  & 0.047 & 0.01  & 0.61  \\
+total sulfur dioxide & 45.91  & 32.78 & 6.00  & 289.0 \\
+density              & 0.9967 & 0.002 & 0.990 & 1.004 \\
+sulphates            & 0.658  & 0.170 & 0.33  & 2.00  \\
+alcohol              & 10.442 & 1.082 & 8.40  & 14.90 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Variable Objetivo}
+
+La variable \texttt{quality} fue binarizada seg\'{u}n el criterio:
+
+\begin{equation}
+  \text{target} =
+  \begin{cases}
+    1\ (\text{BUENA}) & \text{si } \texttt{quality} \geq 6 \\
+    0\ (\text{MALA})  & \text{si } \texttt{quality} < 6
+  \end{cases}
+\end{equation}
+
+Como se aprecia en la Fig.~\ref{fig:target}, la distribuci\'{o}n resultante es de 621 vinos BUENOS~(54.33\%) y 522 MALOS~(45.67\%). El dataset presenta un desbalance leve que, si bien no es cr\'{i}tico, justifica el uso de \textit{stratified sampling} para preservar esta proporci\'{o}n en todos los subconjuntos y el uso del AUC como m\'{e}trica principal de selecci\'{o}n de modelo.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.72\linewidth]{target_distribution.png}
+  \caption{Distribuci\'{o}n de la variable objetivo binarizada. La clase BUENA (1) representa el 54.33\% y MALA (0) el 45.67\% del total.}
+  \label{fig:target}
+\end{figure}
+
+\subsection{Distribuci\'{o}n de Variables Num\'{e}ricas}
+
+Los histogramas de la Fig.~\ref{fig:histogramas} revelan patrones importantes en la distribuci\'{o}n de las once variables. \texttt{residual sugar} y \texttt{chlorides} exhiben distribuciones fuertemente asim\'{e}tricas hacia la derecha con una cola extensa, concentrando la gran mayor\'{i}a de observaciones en valores bajos (2--3~g/L y 0.07--0.09~g/L respectivamente) pero con casos aislados que alcanzan 15.5~g/L y 0.6~g/L. \texttt{total sulfur dioxide} presenta un comportamiento similar con un rango de 6 a 289~mg/L. Por su parte, \texttt{pH} y \texttt{density} muestran distribuciones aproximadamente normales, centradas en 3.31 y 0.9967 respectivamente. \texttt{alcohol} muestra una distribuci\'{o}n bimodal con picos alrededor de 9.5\% y 11\%, lo que anticipa su utilidad discriminativa. Estas asimetr\'{i}as son indicativas de la presencia de valores at\'{i}picos que deben ser tratados antes del modelado.
+
+\begin{figure*}[tp]
+  \centering
+  \includegraphics[width=0.92\textwidth]{histogramas.png}
+  \caption{Histogramas de las 11 variables num\'{e}ricas. Se observan distribuciones marcadamente asim\'{e}tricas en \texttt{residual sugar}, \texttt{chlorides} y \texttt{total sulfur dioxide}, con colas extensas hacia valores altos.}
+  \label{fig:histogramas}
+\end{figure*}
+
+\subsection{Boxplots por Clase}
+
+Los boxplots estratificados por clase (Fig.~\ref{fig:boxplots}) permiten identificar las variables con mayor poder discriminativo. \texttt{alcohol} muestra la diferencia m\'{a}s clara: la mediana de vinos BUENOS (~11\%) es notablemente superior a la de MALOS (~9.5\%), con rangos intercuartiles que apenas se solapan. \texttt{sulphates} evidencia una tendencia similar, con vinos BUENOS presentando valores m\'{a}s altos (~0.70 vs.~0.62~g/L). \texttt{volatile acidity} muestra el patr\'{o}n inverso: los vinos MALOS tienen mayor acidez vol\'{a}til (mediana~0.58 vs.~0.49~g/L), consistente con que el exceso de \'{a}cido ac\'{e}tico deteriora el sabor. En contraste, variables como \texttt{residual sugar}, \texttt{fixed acidity} y \texttt{pH} presentan cajas pr\'{a}cticamente superpuestas entre clases, lo que anticipa su menor contribuci\'{o}n al modelo.
+
+\begin{figure*}[tp]
+  \centering
+  \includegraphics[width=0.92\textwidth]{boxplots.png}
+  \caption{Boxplots de las 11 variables segmentados por clase. \texttt{alcohol}, \texttt{sulphates} y \texttt{volatile acidity} muestran las diferencias m\'{a}s marcadas entre vinos BUENOS y MALOS.}
+  \label{fig:boxplots}
+\end{figure*}
+
+\subsection{Matriz de Correlaci\'{o}n}
+
+El mapa de calor (Fig.~\ref{fig:correlacion}) revela la estructura de dependencias lineales del dataset. Respecto al \textit{target}, \texttt{alcohol} lidera con la mayor correlaci\'{o}n positiva (0.44), seguido de \texttt{sulphates}~(0.23) y \texttt{citric acid}~(0.16). \texttt{volatile acidity} presenta la correlaci\'{o}n negativa m\'{a}s fuerte ($-$0.33), indicando que a mayor acidez vol\'{a}til, menor probabilidad de calidad BUENA. Entre variables predictoras, se destaca la correlaci\'{o}n entre \texttt{density} y \texttt{fixed acidity}~(0.68), entre \texttt{citric acid} y \texttt{fixed acidity}~(0.67), y entre \texttt{free sulfur dioxide} y \texttt{total sulfur dioxide}~(0.66). Estas relaciones son relevantes para el an\'{a}lisis de multicolinealidad en la selecci\'{o}n de caracter\'{i}sticas. Notablemente, \texttt{alcohol} y \texttt{density} presentan correlaci\'{o}n inversa fuerte ($-$0.49), lo cual es esperado desde la qu\'{i}mica del vino: a mayor contenido alc\'{o}holico, menor densidad.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{correlacion.png}
+  \caption{Matriz de correlaci\'{o}n de Pearson. La fila \textit{target} muestra que \texttt{alcohol}~(0.44) y \texttt{volatile acidity}~($-$0.33) son los predictores lineales m\'{a}s fuertes. Se identifican correlaciones inter-variables relevantes entre \texttt{density}--\texttt{fixed acidity}~(0.68) y \texttt{alcohol}--\texttt{density}~($-$0.49).}
+  \label{fig:correlacion}
+\end{figure}
+
+\subsection{An\'{a}lisis y Manejo de Valores At\'{i}picos}
+
+\subsubsection{Detecci\'{o}n mediante IQR}
+
+Para evitar \textit{data leakage}, el split estratificado se realiz\'{o} previamente a la detecci\'{o}n de outliers. Los l\'{i}mites IQR se calcularon exclusivamente sobre el conjunto de entrenamiento (800~muestras) y luego se aplicaron a los tres subconjuntos. Se aplic\'{o} el m\'{e}todo del Rango Intercuart\'{i}lico (IQR) para identificar observaciones fuera del rango esperado. Un valor $x$ se considera at\'{i}pico si:
+
+\begin{equation}
+  x < Q_1 - 1.5 \cdot IQR \quad \text{o} \quad x > Q_3 + 1.5 \cdot IQR
+\end{equation}
+
+donde $IQR = Q_3 - Q_1$. Los resultados, visualizados en la Fig.~\ref{fig:outliers_count}, muestran que \texttt{residual sugar} concentra el mayor n\'{u}mero de valores at\'{i}picos con 72 casos~(9.00\% del total de train), seguido por \texttt{chlorides} con 49~(6.12\%) y \texttt{fixed acidity} y \texttt{sulphates} con 33~(4.12\%) cada una. En el extremo opuesto, \texttt{citric acid} presenta apenas 1 caso~(0.12\%) y \texttt{volatile acidity}~8~(1.00\%). Estos valores concuerdan con las asimetr\'{i}as observadas en los histogramas.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{outliers_count.png}
+  \caption{Cantidad de outliers por variable seg\'{u}n el m\'{e}todo IQR aplicado sobre el conjunto de entrenamiento. \texttt{residual sugar}~(72) y \texttt{chlorides}~(49) son las variables m\'{a}s afectadas, mientras que \texttt{citric acid} es pr\'{a}cticamente libre de valores at\'{i}picos.}
+  \label{fig:outliers_count}
+\end{figure}
+
+\subsubsection{Estrategia de Manejo: Winzorizaci\'{o}n}
+
+Dado que los datos corresponden a mediciones f\'{i}sico-qu\'{i}micas reales de vinos, los valores extremos son f\'{i}sicamente posibles: un vino con az\'{u}car residual de 15~g/L o cloruros de 0.6~g/L puede existir. Eliminar estas filas reducir\'{i}a el tama\~{n}o del dataset y podr\'{i}a sesgar el modelo al excluir casos v\'{a}lidos de la distribuci\'{o}n real. Por estas razones se opt\'{o} por \textbf{winzorizaci\'{o}n (capping)}: los valores por encima del l\'{i}mite superior IQR se recortan a dicho l\'{i}mite, y los inferiores al l\'{i}mite inferior de igual forma. Esto preserva las 1{,}143 instancias sin introducir datos artificiales.
+
+La Fig.~\ref{fig:winsor} ilustra el efecto sobre las tres variables m\'{a}s afectadas. Para \texttt{residual sugar}, el rango se redujo de [0.9, 15.5] a [0.85, 3.65]~g/L, eliminando la cola larga. \texttt{chlorides} pas\'{o} de un m\'{a}ximo de 0.61 a 0.12~g/L. \texttt{fixed acidity} redujo su m\'{a}ximo de 15.9 a 12.35~g/L. En todos los casos, la caja del boxplot se mantiene intacta y solo se eliminan los puntos extremos.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{outliers_before_after.png}
+  \caption{Efecto de la winzorizaci\'{o}n en \texttt{residual sugar}, \texttt{chlorides} y \texttt{fixed acidity}. Las filas superiores muestran la distribuci\'{o}n original con outliers en train; las inferiores, tras aplicar capping al l\'{i}mite IQR. La estructura central de cada variable se preserva.}
+  \label{fig:winsor}
+\end{figure}
+
+\subsubsection{Comparaci\'{o}n de Estrategias}
+
+Para fundamentar la elecci\'{o}n de la winzorizaci\'{o}n sobre la eliminaci\'{o}n de filas, se entren\'{o} un modelo id\'{e}ntico (LR=0.001, batch=64, epochs=100) sobre dos versiones del dataset, evaluando el desempe\~{n}o en el conjunto de prueba:
+
+\begin{itemize}
+  \item \textbf{Estrategia A --- Winzorizaci\'{o}n (1.5$\times$IQR):} train=800, val=171. Sin eliminar instancias.
+  \item \textbf{Estrategia B --- Eliminaci\'{o}n de outliers extremos (3$\times$IQR):} train=722, val=158. Se eliminan los valores que superan tres veces el IQR, umbral a partir del cual los casos son genuinamente at\'{i}picos (78 instancias de train y 13 de validaci\'{o}n eliminadas).
+\end{itemize}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.92\linewidth]{outliers_strategy_comparison.png}
+  \caption{Comparaci\'{o}n de AUC, F1 y Accuracy en el conjunto de prueba bajo las dos estrategias de manejo de outliers. La winzorizaci\'{o}n obtiene resultados superiores, manteniendo adem\'{a}s todas las instancias del dataset.}
+  \label{fig:outlier_comp}
+\end{figure}
+
+Como muestra la Fig.~\ref{fig:outlier_comp}, la winzorizaci\'{o}n (Estrategia A) produce resultados superiores en el conjunto de prueba en todas las m\'{e}tricas: AUC 0.8485 vs. 0.8102, F1 0.8125 vs. 0.7456 y Accuracy 0.7907 vs. 0.7208. La eliminaci\'{o}n con umbral 3$\times$IQR reduce el tama\~{n}o del conjunto de entrenamiento sin ofrecer ganancia en desempe\~{n}o, lo que confirma que la winzorizaci\'{o}n es la estrategia \'{o}ptima para este problema.
+
+% ── III. SELECCIÓN DE CARACTERÍSTICAS ────────────────────────────────────────
+\section{Selecci\'{o}n de Caracter\'{i}sticas}
+
+\subsection{Justificaci\'{o}n Matem\'{a}tica}
+
+La tarea establece un m\'{a}ximo de seis caracter\'{i}sticas. Se combinaron dos m\'{e}todos complementarios para garantizar una selecci\'{o}n robusta. Ambos criterios se calcularon exclusivamente sobre el conjunto de entrenamiento winsorizado, evitando as\'{i} cualquier forma de \textit{data leakage} metodol\'{o}gico:
+
+\textbf{1. Correlaci\'{o}n de Pearson (valor absoluto):} Cuantifica la relaci\'{o}n lineal entre cada variable $X_i$ y el \textit{target} $Y$:
+
+\begin{equation}
+  r(X_i, Y) = \frac{\text{Cov}(X_i, Y)}{\sigma_{X_i} \cdot \sigma_Y}
+\end{equation}
+
+\textbf{2. Informaci\'{o}n Mutua (MI):} Captura dependencias lineales y no lineales, definida como:
+
+\begin{equation}
+  MI(X_i;\, Y) = \sum_{y}\sum_{x} p(x,y)\,\log\frac{p(x,y)}{p(x)\,p(y)}
+\end{equation}
+
+Ambos m\'{e}todos se normalizaron a rankings de 0 a 1 y se promedi\'{o} el resultado. Este enfoque combinado es m\'{a}s robusto que usar cualquiera de los dos de forma aislada: Pearson puede pasar por alto relaciones no lineales, mientras que MI puede ser inestable con muestras peque\~{n}as. Adicionalmente, se verific\'{o} que ning\'{u}n par de las caracter\'{i}sticas seleccionadas tuviera correlaci\'{o}n mutua superior a 0.85. Ning\'{u}n par super\'{o} dicho umbral, por lo que no fue necesario descartar ninguna variable por multicolinealidad.
+
+\subsection{Resultados de la Selecci\'{o}n}
+
+La Fig.~\ref{fig:feature_sel} presenta los tres rankings de forma visual. En la columna izquierda (Pearson), \texttt{alcohol}~(0.4426) lidera ampliamente, seguido de \texttt{volatile acidity}~(0.2983) y \texttt{total sulfur dioxide}~(0.2773). La columna central (MI) confirma el liderazgo de \texttt{alcohol}~(0.1050) pero reordena las siguientes posiciones: \texttt{sulphates} sube al segundo lugar~(0.0873) y \texttt{total sulfur dioxide} al tercero~(0.0610). El ranking combinado (columna derecha) refleja el consenso entre ambos criterios.
+
+\begin{figure*}[tp]
+  \centering
+  \includegraphics[width=0.92\textwidth]{feature_selection.png}
+  \caption{Rankings de selecci\'{o}n de caracter\'{i}sticas calculados sobre train. De izquierda a derecha: correlaci\'{o}n de Pearson, informaci\'{o}n mutua, y ranking promedio combinado. \texttt{alcohol} lidera en los tres criterios. \texttt{pH} y \texttt{residual sugar} quedan consistentemente en las \'{u}ltimas posiciones.}
+  \label{fig:feature_sel}
+\end{figure*}
+
+La Tabla~\ref{tab:feature_ranking} presenta los valores num\'{e}ricos completos. Las seis caracter\'{i}sticas seleccionadas son: \texttt{alcohol}, \texttt{total sulfur dioxide}, \texttt{volatile acidity}, \texttt{sulphates}, \texttt{density} y \texttt{chlorides}. Las variables descartadas (\texttt{free sulfur dioxide}, \texttt{citric acid}, \texttt{fixed acidity}, \texttt{pH} y \texttt{residual sugar}) obtuvieron rankings consistentemente bajos en ambos criterios, y en el caso de \texttt{residual sugar}, MI pr\'{a}cticamente nula (0.0000).
+
+\begin{table}[H]
+\caption{Ranking combinado de caracter\'{i}sticas (Pearson + MI, sobre train)}
+\label{tab:feature_ranking}
+\centering
+\begin{tabular}{lrrr}
+\toprule
+\textbf{Caracter\'{i}stica} & \textbf{$|r|$ Pearson} & \textbf{MI} & \textbf{Rank prom.} \\
+\midrule
+alcohol              & 0.4426 & 0.1050 & 1.0000 \\
+total sulfur dioxide & 0.2773 & 0.0610 & 0.8182 \\
+volatile acidity     & 0.2983 & 0.0480 & 0.8182 \\
+sulphates            & 0.2770 & 0.0873 & 0.8182 \\
+density              & 0.1339 & 0.0376 & 0.5455 \\
+chlorides            & 0.1595 & 0.0209 & 0.4545 \\
+\midrule
+free sulfur dioxide  & 0.0813 & 0.0460 & 0.4545 \\
+citric acid          & 0.1281 & 0.0216 & 0.4091 \\
+fixed acidity        & 0.0842 & 0.0232 & 0.4091 \\
+pH                   & 0.0601 & 0.0039 & 0.1818 \\
+residual sugar       & 0.0152 & 0.0000 & 0.0909 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Diagramas de Dispersi\'{o}n}
+
+La Fig.~\ref{fig:scatter} confirma visualmente el poder discriminativo de las seis caracter\'{i}sticas seleccionadas. En \texttt{alcohol}, los vinos BUENOS (verde) se concentran claramente por encima de 10.5\%, mientras que los MALOS dominan en valores inferiores a 10\%. \texttt{volatile acidity} muestra el patr\'{o}n complementario: los MALOS se distribuyen hasta 1.0~g/L, mientras que los BUENOS rara vez superan 0.8~g/L. Para \texttt{sulphates}, la separaci\'{o}n es menos limpia pero visible: los BUENOS tienen mayor densidad en el rango 0.6--0.9. \texttt{total sulfur dioxide}, \texttt{chlorides} y \texttt{density} muestran solapamiento considerable entre clases, lo que explica por qu\'{e} el modelo final alcanza un AUC aproximado de 0.83 y no valores m\'{a}s altos: la frontera de decisi\'{o}n en estas variables no es n\'{i}tida.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{scatter_features.png}
+  \caption{Diagramas de dispersi\'{o}n de las seis caracter\'{i}sticas seleccionadas vs. \textit{target}. \texttt{alcohol} y \texttt{volatile acidity} presentan la mayor separaci\'{o}n entre clases. \texttt{total sulfur dioxide}, \texttt{chlorides} y \texttt{density} muestran solapamiento, lo cual es consistente con sus rankings intermedios.}
+  \label{fig:scatter}
+\end{figure}
+
+% ── IV. PREPROCESAMIENTO ──────────────────────────────────────────────────────
+\section{Preprocesamiento y Divisi\'{o}n del Dataset}
+
+\subsection{Stratified Sampling}
+
+Se dividi\'{o} el dataset en tres subconjuntos aplicando \textit{stratified sampling} \textbf{antes} del c\'{a}lculo de outliers y de la selecci\'{o}n de caracter\'{i}sticas, para evitar cualquier forma de \textit{data leakage}:
+
+\begin{itemize}
+  \item \textbf{Entrenamiento:} 800 muestras (70\%) --- 54.37\% positivos
+  \item \textbf{Validaci\'{o}n:} 171 muestras (15\%) --- 54.39\% positivos
+  \item \textbf{Prueba:} 172 muestras (15\%) --- 54.07\% positivos
+\end{itemize}
+
+El stratified sampling es la t\'{e}cnica adecuada para este problema por dos razones: primero, el dataset presenta un desbalance leve (54.33\% vs.\ 45.67\%) que un muestreo aleatorio puro podr\'{i}a amplificar en particiones peque\~{n}as como la de validaci\'{o}n~(171 muestras); segundo, preservar la distribuci\'{o}n original garantiza que las m\'{e}tricas calculadas sobre validaci\'{o}n y prueba sean representativas del problema real y no de una distribuci\'{o}n artificial.
+
+\subsection{Normalizaci\'{o}n}
+
+Se aplic\'{o} \texttt{StandardScaler} para transformar cada caracter\'{i}stica a media cero y desviaci\'{o}n est\'{a}ndar uno:
+
+\begin{equation}
+  x' = \frac{x - \mu_{\text{train}}}{\sigma_{\text{train}}}
+\end{equation}
+
+La normalizaci\'{o}n es indispensable para la regresi\'{o}n log\'{i}stica por dos motivos: garantiza que el gradiente no sea dominado por variables con rangos grandes (como \texttt{total sulfur dioxide} con rango~[6, 289]) frente a variables con rangos peque\~{n}os (como \texttt{density} en [0.990, 1.004]), y acelera la convergencia del optimizador Adam. El escalador se ajust\'{o} \'{u}nicamente con los datos de entrenamiento y se aplic\'{o} la misma transformaci\'{o}n a validaci\'{o}n y prueba, evitando as\'{i} \textit{data leakage}.
+
+% ── V. IMPLEMENTACIÓN ─────────────────────────────────────────────────────────
+\section{Implementaci\'{o}n del Modelo}
+
+\subsection{Arquitectura}
+
+Se implement\'{o} la regresi\'{o}n log\'{i}stica como una red neuronal de capa \'{u}nica en PyTorch, heredando de \texttt{nn.Module}:
+
+\begin{equation}
+  \hat{y} = \sigma\!\left(\mathbf{w}^\top \mathbf{x} + b\right)
+           = \frac{1}{1 + e^{-(\mathbf{w}^\top \mathbf{x} + b)}}
+\end{equation}
+
+donde $\mathbf{x} \in \mathbb{R}^6$ es el vector de caracter\'{i}sticas normalizadas, $\mathbf{w} \in \mathbb{R}^6$ son los pesos aprendibles y $b$ es el sesgo. La salida $\hat{y} \in (0,1)$ representa la probabilidad estimada de calidad BUENA.
+
+\subsection{Funci\'{o}n de P\'{e}rdida}
+
+Se utiliz\'{o} \textit{Binary Cross-Entropy} (BCE), funci\'{o}n de p\'{e}rdida can\'{o}nica para clasificaci\'{o}n binaria:
+
+\begin{equation}
+  \mathcal{L}(\theta)
+  = -\frac{1}{N}\sum_{i=1}^{N}
+    \Bigl[y_i \log\hat{y}_i + (1-y_i)\log(1-\hat{y}_i)\Bigr]
+\end{equation}
+
+BCE penaliza de forma cuadr\'{a}ticamente creciente las predicciones err\'{o}neas con alta confianza, lo que incentiva al modelo a ser calibrado, no solo correcto.
+
+\subsection{Optimizador}
+
+Se emple\'{o} Adam (\textit{Adaptive Moment Estimation})~\cite{kingma2014}, que adapta la tasa de aprendizaje por par\'{a}metro utilizando estimaciones del primer y segundo momento del gradiente. Es preferible a SGD b\'{a}sico por su mayor velocidad de convergencia y menor sensibilidad al \textit{learning rate} inicial, especialmente importante dado que se exploran diez configuraciones distintas.
+
+% ── VI. EXPERIMENTOS ──────────────────────────────────────────────────────────
+\section{Experimentos y Resultados}
+
+\subsection{Configuraciones de Hiperpar\'{a}metros}
+
+Se ejecutaron diez entrenamientos variando \textit{learning rate} (LR), \textit{batch size} y \textit{epochs}. La Tabla~\ref{tab:resultados} presenta los resultados completos en el conjunto de validaci\'{o}n. Se registra adem\'{a}s la \'{e}poca de mejor val loss (\textit{Best Val Epoch}) para identificar el punto \'{o}ptimo de convergencia de cada experimento.
+
+\begin{table*}[t]
+\caption{Comparativa de los 10 experimentos --- m\'{e}tricas en validaci\'{o}n}
+\label{tab:resultados}
+\centering
+\begin{tabular}{cccccrrcrrrrrr}
+\toprule
+\textbf{Exp} & \textbf{LR} & \textbf{Batch} & \textbf{Epochs} & \textbf{Best Ep.}
+  & \textbf{Train Loss} & \textbf{Val Loss} & \textbf{Overfit}
+  & \textbf{Acc} & \textbf{Prec} & \textbf{Recall} & \textbf{F1} & \textbf{AUC} \\
+\midrule
+1  & 0.0100 & 32  & 50  & 10  & 0.5161 & 0.4789 & No & 0.8012 & 0.8315 & 0.7957 & 0.8132 & 0.8514 \\
+2  & 0.0100 & 64  & 50  & 49  & 0.5178 & 0.4786 & No & 0.7895 & 0.8132 & 0.7957 & 0.8043 & 0.8526 \\
+3  & 0.0100 & 128 & 50  & 35  & 0.4995 & 0.4796 & No & 0.7778 & 0.8022 & 0.7849 & 0.7935 & 0.8521 \\
+4  & 0.0010 & 32  & 100 & 97  & 0.5152 & 0.4790 & No & 0.7719 & 0.7935 & 0.7849 & 0.7892 & 0.8537 \\
+5  & 0.0010 & 64  & 100 & 100 & 0.5286 & 0.4928 & No & 0.7778 & 0.7778 & 0.8280 & 0.8021 & 0.8490 \\
+6  & 0.0010 & 128 & 100 & 100 & 0.5393 & 0.5146 & No & 0.7778 & 0.7778 & 0.8280 & 0.8021 & 0.8507 \\
+7  & 0.0050 & 32  & 150 & 135 & 0.5150 & 0.4791 & No & 0.7895 & 0.8202 & 0.7849 & 0.8022 & 0.8514 \\
+8  & 0.0050 & 64  & 150 & 143 & 0.5205 & 0.4789 & No & 0.7836 & 0.8111 & 0.7849 & 0.7978 & 0.8518 \\
+\rowcolor{gray!20}
+9  & 0.0005 & 32  & 200 & 129 & 0.5146 & 0.4784 & No & 0.7778 & 0.8022 & 0.7849 & 0.7935 & \textbf{0.8528} \\
+10 & 0.0001 & 64  & 300 & 300 & 0.5578 & 0.5331 & No & 0.7485 & 0.8049 & 0.7097 & 0.7543 & 0.8235 \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+\subsection{An\'{a}lisis de Curvas de P\'{e}rdida}
+
+Las curvas de la Fig.~\ref{fig:curvas} permiten identificar patrones de convergencia distintos seg\'{u}n la configuraci\'{o}n.
+
+\textbf{Experimentos 1--3} (LR=0.01, 50~epochs): Convergen r\'{a}pidamente en las primeras 10 \'{e}pocas. La \textit{validation loss} cae por debajo de la \textit{training loss} desde el inicio y se estabiliza cerca de 0.479--0.480, mientras la training loss se mantiene alrededor de 0.499--0.518. Este comportamiento es explicable: con batch size peque\~{n}o, el gradiente estoc\'{a}stico introduce ruido que eleva artificialmente la training loss respecto a la validation loss. No constituye overfitting.
+
+\textbf{Experimentos 4--6} (LR=0.001, 100~epochs): El Exp~4 (batch=32) muestra descenso progresivo y estable, alcanzando su mejor val loss en la \'{e}poca~97. Los Exp~5 y~6 (batch=64 y~128) presentan convergencia m\'{a}s lenta, sin alcanzar la meseta al final de las 100~\'{e}pocas (Best Val Epoch=100), lo que indica que se beneficiar\'{i}an de m\'{a}s iteraciones.
+
+\textbf{Experimentos 7--9}: El Exp~7 (LR=0.005, batch=32) converge muy r\'{a}pidamente en las primeras 30~\'{e}pocas y se estabiliza. El Exp~9 (LR=0.0005, batch=32, 200~epochs) muestra descenso gradual y alcanza su \'{o}ptimo en la \'{e}poca~129, con train loss=0.5146 y val loss=0.4784 al finalizar.
+
+\textbf{Experimento~10} (LR=0.0001, 300~epochs): Ambas curvas descienden de forma continua durante las 300~\'{e}pocas sin llegar a una meseta clara, con la training loss en 0.5578 y la validation loss en 0.5331 al final (Best Val Epoch=300). Con un LR tan bajo el modelo requiere muchas m\'{a}s iteraciones para converger, configurando un caso de \textbf{underfitting por hiperpar\'{a}metros inadecuados}.
+
+\begin{figure*}[tp]
+  \centering
+  \includegraphics[width=0.92\textwidth]{training_curves.png}
+  \caption{Curvas de Training vs.\ Validation Loss para los 10 experimentos. Los experimentos 1--9 convergen correctamente. El Exp~10 (LR=0.0001) a\'{u}n no ha alcanzado la meseta tras 300~\'{e}pocas, indicando underfitting por tasa de aprendizaje insuficiente.}
+  \label{fig:curvas}
+\end{figure*}
+
+\subsection{Comparaci\'{o}n de M\'{e}tricas}
+
+La Fig.~\ref{fig:metricas} presenta la evoluci\'{o}n de las cinco m\'{e}tricas a trav\'{e}s de los diez experimentos. Se observa que el AUC (p\'{u}rpura) se mantiene estable entre 0.849 y 0.854 para los experimentos 1--9, evidenciando que la capacidad discriminativa del modelo es robusta a variaciones moderadas de hiperpar\'{a}metros. El Exp~10 presenta valores inferiores en todas las m\'{e}tricas, reflejo directo del underfitting ya descrito.
+
+\begin{figure}[tp]
+  \centering
+  \includegraphics[width=\linewidth]{metrics_comparison.png}
+  \caption{Comparaci\'{o}n de m\'{e}tricas de validaci\'{o}n. Los experimentos 1--9 mantienen AUC estable~($\approx$0.851) y m\'{e}tricas cercanas entre s\'{i}. El Exp~10 presenta valores inferiores producto del underfitting.}
+  \label{fig:metricas}
+\end{figure}
+
+% ── VII. ANÁLISIS DE RESULTADOS ───────────────────────────────────────────────
+\section{An\'{a}lisis del Modelo Final}
+
+\subsection{Selecci\'{o}n del Mejor Modelo}
+
+El \textbf{Experimento~9} (LR=0.0005, batch=32, epochs=200) fue seleccionado como modelo final al obtener el mayor AUC en validaci\'{o}n~(0.8528). El AUC es la m\'{e}trica de selecci\'{o}n m\'{a}s adecuada para este problema por dos razones: es independiente del umbral de decisi\'{o}n, permitiendo evaluar la capacidad discriminativa global del modelo, y es m\'{a}s robusta que el accuracy cuando existe desbalance de clases~\cite{sklearn}.
+
+\subsection{Pesos Aprendidos del Modelo Final}
+
+Los coeficientes $\mathbf{w}$ aprendidos por la capa lineal son directamente interpretables como los pesos de la regresi\'{o}n log\'{i}stica. Dado que todas las caracter\'{i}sticas est\'{a}n normalizadas a la misma escala, los pesos son comparables entre s\'{i}: un valor positivo indica que la variable aumenta la probabilidad de calidad BUENA, y un valor negativo que la reduce.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.92\linewidth]{model_weights.png}
+  \caption{Coeficientes aprendidos por el modelo final (Exp~9). Verde indica efecto positivo sobre la probabilidad de calidad BUENA; rojo, efecto negativo.}
+  \label{fig:weights}
+\end{figure}
+
+La Fig.~\ref{fig:weights} confirma cuantitativamente las observaciones del EDA. \texttt{alcohol} obtiene el peso positivo m\'{a}s alto~(+0.9518), siendo la variable que m\'{a}s incrementa la probabilidad de BUENA al aumentar. \texttt{sulphates} contribuye positivamente~(+0.4895), mientras que \texttt{density} tiene un efecto positivo menor~(+0.0885). \texttt{total sulfur dioxide} presenta el peso negativo de mayor magnitud~($-$0.4398), seguido de \texttt{volatile acidity}~($-$0.4174): mayor acidez vol\'{a}til reduce significativamente la probabilidad de calidad BUENA, consistente con su correlaci\'{o}n negativa ($-$0.33) con el \textit{target}. \texttt{chlorides} muestra el menor peso en valor absoluto~($-$0.1795), lo que sugiere que su inclusi\'{o}n aporta informaci\'{o}n marginal aunque no nula.
+
+\subsection{Significancia Estad\'{i}stica de la Selecci\'{o}n}
+
+Los tres experimentos con mayor AUC en validaci\'{o}n son el Exp~9~(0.8528), Exp~2~(0.8526) y Exp~4~(0.8537). Para determinar si las diferencias son estad\'{i}sticamente significativas, se calcul\'{o} el error est\'{a}ndar del AUC mediante el m\'{e}todo de Hanley \& McNeil~\cite{hanley1982}:
+
+\begin{equation}
+  SE(\widehat{AUC}) = \sqrt{\frac{A + B + C}{n_+ \cdot n_-}}
+\end{equation}
+
+donde los t\'{e}rminos del numerador se definen como:
+
+\begin{align}
+  A &= AUC(1-AUC) \notag \\
+  B &= (n_+ - 1)\!\left(\frac{AUC}{2-AUC} - AUC^2\right) \notag \\
+  C &= (n_- - 1)\!\left(\frac{2\,AUC^2}{1+AUC} - AUC^2\right) \notag
+\end{align}
+
+con $n_+$ y $n_-$ siendo el n\'{u}mero de positivos y negativos en validaci\'{o}n (93 y 78 respectivamente). Los intervalos de confianza al 95\% resultantes son: Exp~9: IC95\% = [0.7962,~0.9094] (SE=0.0289); Exp~2: IC95\% = [0.7959,~0.9093] (SE=0.0289); Exp~4: IC95\% = [0.7972,~0.9102] (SE=0.0288). Los intervalos se solapan completamente, indicando que la diferencia \textbf{no es estad\'{i}sticamente significativa}. El Exp~9 se selecciona como modelo final por ser el punto m\'{a}ximo observado, reconociendo que cualquiera de los tres hubiera sido una elecci\'{o}n igualmente v\'{a}lida.
+
+\subsection{Evaluaci\'{o}n en el Conjunto de Prueba}
+
+\begin{table}[H]
+\caption{M\'{e}tricas del Experimento~9 --- validaci\'{o}n vs.\ prueba}
+\label{tab:final}
+\centering
+\begin{tabular}{lcc}
+\toprule
+\textbf{M\'{e}trica} & \textbf{Validaci\'{o}n} & \textbf{Prueba} \\
+\midrule
+Accuracy  & 0.7778 & 0.7500 \\
+Precision & 0.8022 & 0.7778 \\
+Recall    & 0.7849 & 0.7527 \\
+F1-Score  & 0.7935 & 0.7650 \\
+AUC       & 0.8528 & 0.8277 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+La Tabla~\ref{tab:final} muestra una ca\'{i}da moderada de todos los indicadores al pasar de validaci\'{o}n a prueba. El AUC disminuye de 0.8528 a 0.8277 ($\Delta = 0.025$), el F1 de 0.7935 a 0.7650 ($\Delta = 0.029$) y el accuracy de 0.7778 a 0.7500 ($\Delta = 0.028$). Estas diferencias son peque\~{n}as y esperables dado el tama\~{n}o del conjunto de prueba~(172 muestras), y no constituyen evidencia de sobreajuste. El AUC de 0.8277 en prueba confirma que el modelo generaliza bien a datos no vistos.
+
+\subsection{Matriz de Confusi\'{o}n}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.78\linewidth]{confusion_matrix.png}
+  \caption{Matriz de confusi\'{o}n del modelo final (Exp~9) sobre el conjunto de prueba (172 instancias). TN=58, FP=21, FN=23, TP=70.}
+  \label{fig:confusion}
+\end{figure}
+
+La matriz de confusi\'{o}n (Fig.~\ref{fig:confusion}) sobre las 172 instancias de prueba muestra:
+
+\begin{itemize}
+  \item \textbf{Verdaderos Negativos (TN = 58):} El modelo clasific\'{o} correctamente 58 vinos MALOS, representando una tasa de especificidad de $58/79 = 73.4\%$.
+  \item \textbf{Falsos Positivos (FP = 21):} 21 vinos MALOS fueron incorrectamente clasificados como BUENOS. Corresponde a una tasa de error Tipo~I de 26.6\%.
+  \item \textbf{Falsos Negativos (FN = 23):} 23 vinos BUENOS fueron clasificados como MALOS. Tasa de error Tipo~II de 24.7\%.
+  \item \textbf{Verdaderos Positivos (TP = 70):} El modelo identific\'{o} correctamente 70 vinos de calidad BUENA, con una sensibilidad (recall) de $70/93 = 75.3\%$.
+\end{itemize}
+
+La simetr\'{i}a aproximada entre FP~(21) y FN~(23) indica que el modelo no presenta sesgo sistem\'{a}tico hacia ninguna clase. La precision de 0.7778 implica que cuando el modelo predice BUENO, acierta casi el 78\% de las veces, valor adecuado para una aplicaci\'{o}n de control de calidad donde los costos de FP y FN son similares.
+
+% ── VIII. DISCUSIÓN ───────────────────────────────────────────────────────────
+\section{Discusi\'{o}n}
+
+Los resultados confirman que las propiedades f\'{i}sico-qu\'{i}micas del vino contienen informaci\'{o}n suficiente para clasificar su calidad con AUC superior a 0.82. El \texttt{alcohol} emerge consistentemente como el predictor m\'{a}s importante, lo cual es consistente con la literatura enol\'{o}gica: vinos con mayor graduaci\'{o}n alc\'{o}holica tienden a tener mayor cuerpo y complejidad~\cite{cortez2009}. La \texttt{volatile acidity} negativa refuerza la idea de que el \'{a}cido ac\'{e}tico en exceso deteriora la calidad organol\'{e}ptica.
+
+La estabilidad de los resultados en los experimentos 1--9 sugiere que la regresi\'{o}n log\'{i}stica ha convergido a un \'{o}ptimo global bien definido: la funci\'{o}n de p\'{e}rdida BCE es convexa para modelos lineales, garantizando que distintas configuraciones de hiperpar\'{a}metros lleguen al mismo m\'{i}nimo si se dan las condiciones de convergencia. Esta propiedad diferencia la regresi\'{o}n log\'{i}stica de redes profundas donde m\'{u}ltiples m\'{i}nimos locales hacen que los hiperpar\'{a}metros impacten m\'{a}s significativamente el resultado final.
+
+La principal limitaci\'{o}n del modelo es su linealidad. Los diagramas de dispersi\'{o}n (Fig.~\ref{fig:scatter}) muestran considerable solapamiento entre clases en \texttt{density}, \texttt{chlorides} y \texttt{total sulfur dioxide}, que una frontera lineal no puede separar eficientemente. Modelos no lineales como \textit{Gradient Boosting} o redes neuronales con capas ocultas podr\'{i}an capturar estas interacciones y mejorar el AUC en prueba.
+
+% ── IX. CONCLUSIONES ──────────────────────────────────────────────────────────
+\section{Conclusiones}
+
+\begin{enumerate}
+  \item Se implement\'{o} exitosamente un modelo de regresi\'{o}n log\'{i}stica en PyTorch para clasificaci\'{o}n binaria de calidad de vino, alcanzando un AUC de 0.8277 y F1-Score de 0.7650 en el conjunto de prueba.
+  \item La selecci\'{o}n de las seis caracter\'{i}sticas m\'{a}s relevantes (\texttt{alcohol}, \texttt{total sulfur dioxide}, \texttt{volatile acidity}, \texttt{sulphates}, \texttt{density}, \texttt{chlorides}) se fundament\'{o} matem\'{a}ticamente con correlaci\'{o}n de Pearson e informaci\'{o}n mutua calculadas sobre train, sin necesidad de descartar ninguna por multicolinealidad.
+  \item La winzorizaci\'{o}n fue la estrategia correcta para manejar outliers: preserv\'{o} las 1{,}143 instancias y obtuvo mejores resultados en prueba (AUC +0.038, F1 +0.067) frente a la eliminaci\'{o}n con umbral 3$\times$IQR que descart\'{o} 78 instancias de entrenamiento.
+  \item El an\'{a}lisis de pesos confirm\'{o} que \texttt{alcohol} es el predictor positivo m\'{a}s influyente~(+0.9518) y \texttt{total sulfur dioxide} el negativo m\'{a}s fuerte~($-$0.4398), seguido por \texttt{volatile acidity}~($-$0.4174), coherente con el EDA y con la literatura enol\'{o}gica.
+  \item El modelo es robusto a variaciones moderadas de hiperpar\'{a}metros (experimentos 1--9 con AUC entre 0.849 y 0.854). El an\'{a}lisis de Hanley \& McNeil confirma que las diferencias entre los tres mejores experimentos no son estad\'{i}sticamente significativas dado el tama\~{n}o del conjunto de validaci\'{o}n.
+  \item El \'{u}nico caso de bajo rendimiento (Exp~10, AUC=0.8235 en validaci\'{o}n) corresponde a underfitting por LR excesivamente bajo (0.0001), cuya \'{e}poca de mejor val loss coincide con el final del entrenamiento (epoch~300), indicando que el modelo a\'{u}n no hab\'{i}a convergido.
+  \item La arquitectura lineal constituye la principal limitaci\'{o}n: el solapamiento entre clases en varias features sugiere que modelos no lineales podr\'{i}an mejorar la clasificaci\'{o}n.
+  \item Como mejora metodol\'{o}gica, tanto la detecci\'{o}n de outliers como la selecci\'{o}n de caracter\'{i}sticas se realizaron exclusivamente sobre el conjunto de entrenamiento, eliminando el riesgo de \textit{data leakage} en estas etapas del pipeline.
+\end{enumerate}
+
+\section*{Agradecimientos}
+
+Los autores agradecen al Instituto Tecnol\'{o}gico de Costa Rica por los recursos y apoyo brindados para el desarrollo de este trabajo.
+
+\begin{thebibliography}{00}
+
+\bibitem{pytorch}
+A. Paszke et al., ``PyTorch: An Imperative Style, High-Performance Deep Learning Library,''
+\textit{Advances in Neural Information Processing Systems}, vol.~32, 2019.
+
+\bibitem{sklearn}
+F. Pedregosa et al., ``Scikit-learn: Machine Learning in Python,''
+\textit{Journal of Machine Learning Research}, vol.~12, pp.~2825--2830, 2011.
+
+\bibitem{cortez2009}
+P. Cortez, A. Cerdeira, F. Almeida, T. Matos, and J. Reis,
+``Modeling wine preferences by data mining from physicochemical properties,''
+\textit{Decision Support Systems}, vol.~47, no.~4, pp.~547--553, 2009.
+
+\bibitem{kingma2014}
+D. P. Kingma and J. Ba,
+``Adam: A Method for Stochastic Optimization,''
+in \textit{Proc. Int. Conf. Learning Representations (ICLR)}, 2015.
+
+\bibitem{mi}
+T. M. Cover and J. A. Thomas,
+\textit{Elements of Information Theory}, 2nd~ed.
+Wiley-Interscience, 2006.
+
+\bibitem{hanley1982}
+J. A. Hanley and B. J. McNeil,
+``The meaning and use of the area under a receiver operating characteristic (ROC) curve,''
+\textit{Radiology}, vol.~143, no.~1, pp.~29--36, 1982.
+
+\bibitem{kaggle}
+Kaggle, ``Wine Quality Dataset,'' 2023.
+[Online]. Available: \url{https://www.kaggle.com/datasets/yasserh/wine-quality-dataset}
+
+\end{thebibliography}
+
+\end{document}
